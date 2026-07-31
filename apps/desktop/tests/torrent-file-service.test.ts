@@ -38,16 +38,19 @@ describe('torrent file service', () => {
     database.close();
   });
 
-  it('rejects paths that escape the isolated torrent directory', () => {
+  it.each(['..\\outside.exe', '../outside.exe', 'C:\\outside.exe', '/outside.exe'])(
+    'rejects unsafe torrent path %s on every operating system',
+    (unsafePath) => {
     expect(() => {
       validateTorrentContents(
         '27a54cbc8334f7f7c90d43482fb9ef1547bce5a7',
         1_024,
-        [{ path: '..\\outside.exe' }],
+        [{ path: unsafePath }],
         'C:\\Downloads\\Kitsune\\Videos',
       );
     }).toThrow('caminho de arquivo inseguro');
-  });
+    },
+  );
 
   it('waits for WebTorrent metadata before persisting the info hash', async () => {
     const downloadPath = await mkdtemp(join(tmpdir(), 'kitsune-webtorrent-'));

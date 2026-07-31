@@ -1,5 +1,5 @@
 import { mkdir, readFile, rm } from 'node:fs/promises';
-import { extname, isAbsolute, join, resolve, sep } from 'node:path';
+import { extname, isAbsolute, join, posix, resolve, sep, win32 } from 'node:path';
 import WebTorrent from 'webtorrent';
 import {
   TorrentDownloadSchema,
@@ -46,8 +46,14 @@ export function validateTorrentContents(
   }
   const root = resolve(destinationPath, infoHash);
   for (const file of files) {
-    const target = resolve(root, file.path);
-    if (isAbsolute(file.path) || (target !== root && !target.startsWith(`${root}${sep}`))) {
+    const portablePath = file.path.replaceAll('\\', '/');
+    const target = resolve(root, portablePath);
+    if (
+      file.path.includes('\0')
+      || posix.isAbsolute(portablePath)
+      || win32.isAbsolute(file.path)
+      || (target !== root && !target.startsWith(`${root}${sep}`))
+    ) {
       throw new ApplicationError('UNSAFE_TORRENT_PATH', 'A release contém um caminho de arquivo inseguro.', false);
     }
   }
