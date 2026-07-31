@@ -1,0 +1,44 @@
+# Dependencies and package-manager cache
+node_modules/
+.pnpm-store/
+
+# Generated builds and reports
+dist/
+out/
+release/
+coverage/
+*.tsbuildinfo
+.eslintcache
+
+# Local runtime data
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.log
+*.dmp
+*.tmp
+*.temp
+
+# Downloaded media must stay outside the repository
+*.torrent
+*.mkv
+*.mp4
+*.webm
+*.avi
+*.srt
+*.ass
+*.ssa
+*.vtt
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini

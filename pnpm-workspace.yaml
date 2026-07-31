@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+
+allowBuilds:
+  better-sqlite3: false
+  bufferutil: false
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  ip-set: false
+  node-datachannel: true
+  utf-8-validate: false
+  utp-native: false
+
+minimumReleaseAgeExclude:
+  - '@types/react-dom@19.2.4'
+  - '@types/react@19.2.18'

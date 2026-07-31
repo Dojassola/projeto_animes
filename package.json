@@ -1,0 +1,21 @@
+{
+  "name": "kitsune",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "pnpm": "11.18.0"
+  },
+  "scripts": {
+    "dev": "corepack pnpm --filter @kitsune/desktop dev",
+    "typecheck": "corepack pnpm --filter @kitsune/desktop typecheck",
+    "lint": "corepack pnpm --filter @kitsune/desktop lint",
+    "test": "corepack pnpm --filter @kitsune/desktop test",
+    "build": "corepack pnpm --filter @kitsune/desktop build",
+    "build:win": "corepack pnpm --filter @kitsune/desktop build:win",
+    "build:portable": "corepack pnpm --filter @kitsune/desktop build:portable"
+  }
+}
