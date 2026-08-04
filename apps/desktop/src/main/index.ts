@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, Menu, safeStorage } from 'electron';
 import { join } from 'node:path';
+import { checkForUpdates } from './auto-update';
 import { openDatabase, type KitsuneDatabase } from './infrastructure/database/open-database';
 import { FileLogger } from './infrastructure/logging/file-logger';
 import { registerIpc } from './ipc/register-ipc';
@@ -109,6 +110,7 @@ if (!app.requestSingleInstanceLock()) {
 
     Menu.setApplicationMenu(null);
     openMainWindow();
+    checkForUpdates(logger);
     logger.write({
       level: 'info',
       category: 'application',

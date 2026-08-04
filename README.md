@@ -8,7 +8,7 @@ baixar vídeos com WebTorrent e localizar legendas em PT-BR e outros idiomas.
 - Electron, React e TypeScript estrito
 - SQLite com migrations
 - AniList e Jikan para catálogo e episódios
-- Nyaa e Tokyo Toshokan para releases, com preferência de idioma e deduplicação
+- Nyaa, Tokyo Toshokan e DarkMahou para releases, com preferência de idioma e deduplicação
 - OpenSubtitles para legendas
 - WebTorrent para downloads locais sem continuar semeando após a conclusão
 
@@ -37,6 +37,18 @@ corepack pnpm build:portable
 ```
 
 O resultado é criado em `apps/desktop/release/` e não deve ser versionado.
+
+## Releases e atualizações
+
+Atualize `apps/desktop/package.json`, faça o commit e publique com:
+
+```powershell
+.\release.ps1
+```
+
+O script valida o projeto e envia a tag `vX.Y.Z`. O GitHub Actions gera o instalador
+NSIS, o executável portátil e `latest.yml`; instalações NSIS verificam novas versões
+automaticamente no GitHub Releases.
 
 ## Estrutura
 
