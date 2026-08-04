@@ -153,6 +153,50 @@ const migrations = [
       `);
     },
   },
+  {
+    version: 6,
+    up(database: KitsuneDatabase): void {
+      database.exec(`
+        ALTER TABLE integration_settings ADD COLUMN primary_language TEXT NOT NULL
+          DEFAULT 'pt-br' CHECK (primary_language IN ('pt-br', 'en', 'ja'));
+
+        CREATE TABLE torrent_downloads_next (
+          release_id TEXT PRIMARY KEY CHECK (
+            (
+              substr(release_id, 1, 5) = 'nyaa:'
+              AND length(release_id) BETWEEN 6 AND 17
+              AND substr(release_id, 6) NOT GLOB '*[^0-9]*'
+            ) OR (
+              substr(release_id, 1, 12) = 'tokyotosho:'
+              AND length(release_id) BETWEEN 13 AND 24
+              AND substr(release_id, 13) NOT GLOB '*[^0-9]*'
+            )
+          ),
+          info_hash TEXT NOT NULL UNIQUE CHECK (length(info_hash) = 40),
+          torrent_file_path TEXT NOT NULL,
+          destination_path TEXT NOT NULL,
+          name TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('queued', 'downloading', 'paused', 'completed', 'failed')),
+          error_message TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        INSERT INTO torrent_downloads_next (
+          release_id, info_hash, torrent_file_path, destination_path,
+          name, state, error_message, created_at, updated_at
+        )
+        SELECT
+          'nyaa:' || release_id, info_hash, torrent_file_path, destination_path,
+          name, state, error_message, created_at, updated_at
+        FROM torrent_downloads;
+
+        DROP TABLE torrent_downloads;
+        ALTER TABLE torrent_downloads_next RENAME TO torrent_downloads;
+        CREATE INDEX idx_torrent_downloads_updated ON torrent_downloads(updated_at DESC);
+      `);
+    },
+  },
 ] as const;
 
 export function migrateDatabase(database: KitsuneDatabase): void {

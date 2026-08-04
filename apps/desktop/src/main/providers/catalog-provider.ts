@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AnimeFormatSchema,
+  type AnimeGenre,
   AnimeRelationTypeSchema,
   AnimeSeasonSchema,
   AnimeStatusSchema,
@@ -44,10 +45,14 @@ export const ExternalAnimeSummaryArraySchema = z.array(ExternalAnimeSummarySchem
 export type ExternalAnimeSummary = z.infer<typeof ExternalAnimeSummarySchema>;
 export type ExternalAnimeDetails = z.infer<typeof ExternalAnimeDetailsSchema>;
 
+export interface CatalogProviderSearchInput {
+  query: string | null;
+  genres: readonly AnimeGenre[];
+}
+
 export interface CatalogProvider {
   readonly id: string;
-  search(query: string, signal: AbortSignal): Promise<ExternalAnimeSummary[]>;
+  search(input: CatalogProviderSearchInput, signal: AbortSignal): Promise<ExternalAnimeSummary[]>;
   home(signal: AbortSignal): Promise<ExternalAnimeSummary[]>;
   getDetails(anilistId: number, signal: AbortSignal): Promise<ExternalAnimeDetails>;
 }
-

@@ -2,6 +2,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises';
 import { extname, isAbsolute, join, posix, resolve, sep, win32 } from 'node:path';
 import WebTorrent from 'webtorrent';
 import {
+  MagnetUriSchema,
   TorrentDownloadSchema,
   type TorrentControlInput,
   type TorrentDownload,
@@ -138,6 +139,9 @@ export class WebTorrentService {
   private async addTorrent(download: StoredTorrentDownload): Promise<StoredTorrentDownload> {
     if (this.disposed) throw new ApplicationError('TORRENT_CLIENT_STOPPED', 'O cliente torrent está encerrado.', true);
     const bytes = await readFile(download.torrentFilePath);
+    const source = extname(download.torrentFilePath).toLocaleLowerCase('en') === '.magnet'
+      ? MagnetUriSchema.parse(bytes.toString('utf8'))
+      : bytes;
     const options = {
       path: download.destinationPath,
       addUID: true,
@@ -173,7 +177,7 @@ export class WebTorrentService {
       };
 
       try {
-        torrent = this.client.add(bytes, options, (readyTorrent) => {
+        torrent = this.client.add(source, options, (readyTorrent) => {
           void this.onReady(readyTorrent, download).then((stored) => {
             if (settled) return;
             settled = true;
@@ -215,7 +219,7 @@ export class WebTorrentService {
       }
       if (download.infoHash !== '0000000000000000000000000000000000000000'
         && download.infoHash !== torrent.infoHash) {
-        throw new ApplicationError('TORRENT_HASH_MISMATCH', 'O arquivo .torrent salvo não corresponde ao download.', false);
+        throw new ApplicationError('TORRENT_HASH_MISMATCH', 'A fonte torrent salva não corresponde ao download.', false);
       }
       for (const file of files) file.select();
       const stored: StoredTorrentDownload = {

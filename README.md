@@ -8,7 +8,7 @@ baixar vídeos com WebTorrent e localizar legendas em PT-BR e outros idiomas.
 - Electron, React e TypeScript estrito
 - SQLite com migrations
 - AniList e Jikan para catálogo e episódios
-- Nyaa para releases
+- Nyaa e Tokyo Toshokan para releases, com preferência de idioma e deduplicação
 - OpenSubtitles para legendas
 - WebTorrent para downloads locais sem continuar semeando após a conclusão
 

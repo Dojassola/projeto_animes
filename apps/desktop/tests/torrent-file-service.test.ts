@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { migrateDatabase } from '../src/main/infrastructure/database/migrations';
+import { NyaaTorrentProvider } from '../src/main/providers/nyaa-torrent-provider';
+import type { TorrentSearchProvider } from '../src/main/providers/torrent-search-provider';
 import { IntegrationSettingsRepository } from '../src/main/repositories/integration-settings-repository';
 import { TorrentDownloadRepository } from '../src/main/repositories/torrent-download-repository';
 import { TorrentFileService } from '../src/main/services/torrent-file-service';
@@ -31,10 +33,37 @@ describe('torrent file service', () => {
     const torrentBytes = new TextEncoder().encode('d4:infod4:name4:testee');
     const fetcher: typeof fetch = () => Promise.resolve(new Response(torrentBytes, { status: 200 }));
 
-    const result = await new TorrentFileService(settings, fetcher).save('1890607');
+    const result = await new TorrentFileService(settings, [new NyaaTorrentProvider()], fetcher).save('nyaa:1890607');
 
-    expect(result.filePath).toBe(join(downloadPath, 'Torrents', '1890607.torrent'));
+    expect(result.filePath).toBe(join(downloadPath, 'Torrents', 'nyaa-1890607.torrent'));
     expect(await readFile(result.filePath)).toEqual(Buffer.from(torrentBytes));
+    database.close();
+  });
+
+  it('saves a validated dubbed-provider magnet without fetching a file', async () => {
+    const downloadPath = await mkdtemp(join(tmpdir(), 'kitsune-magnet-'));
+    temporaryPaths.push(downloadPath);
+    const database = new Database(':memory:');
+    migrateDatabase(database);
+    const settings = new IntegrationSettingsRepository(
+      database,
+      downloadPath,
+      (value) => Buffer.from(value),
+      (value) => value.toString(),
+    );
+    const infoHash = '50f72ec2c58bfa06bae32058a710a51bca180c82';
+    const magnet = `magnet:?xt=urn:btih:${infoHash}&dn=Anime%20Dublado`;
+    const provider: TorrentSearchProvider = {
+      id: 'darkmahou',
+      name: 'DarkMahou · PT-BR Dublado',
+      search: () => Promise.resolve([]),
+      resolveTorrentUrl: () => Promise.resolve(new URL(magnet)),
+    };
+
+    const result = await new TorrentFileService(settings, [provider]).save(`darkmahou:${infoHash}`);
+
+    expect(result.filePath).toBe(join(downloadPath, 'Torrents', `darkmahou-${infoHash}.magnet`));
+    expect(await readFile(result.filePath, 'utf8')).toBe(magnet);
     database.close();
   });
 
@@ -70,13 +99,14 @@ describe('torrent file service', () => {
     ]);
     const torrentFiles = new TorrentFileService(
       settings,
+      [new NyaaTorrentProvider()],
       () => Promise.resolve(new Response(torrentBytes, { status: 200 })),
     );
     const downloads = new TorrentDownloadRepository(database);
     const service = new WebTorrentService(settings, downloads, torrentFiles);
 
     try {
-      const result = await service.start('1');
+      const result = await service.start('nyaa:1');
 
       expect(result.infoHash).toMatch(/^[a-f0-9]{40}$/);
       expect(result.infoHash).not.toBe('0000000000000000000000000000000000000000');

@@ -4,6 +4,9 @@ import { openDatabase, type KitsuneDatabase } from './infrastructure/database/op
 import { FileLogger } from './infrastructure/logging/file-logger';
 import { registerIpc } from './ipc/register-ipc';
 import { AniListProvider } from './providers/anilist/anilist-provider';
+import { DarkMahouTorrentProvider } from './providers/darkmahou-torrent-provider';
+import { NyaaTorrentProvider } from './providers/nyaa-torrent-provider';
+import { TokyoToshoTorrentProvider } from './providers/tokyotosho-torrent-provider';
 import { CatalogRepository } from './repositories/catalog-repository';
 import { ProviderCacheRepository } from './repositories/provider-cache-repository';
 import { SettingsRepository } from './repositories/settings-repository';
@@ -55,8 +58,13 @@ if (!app.requestSingleInstanceLock()) {
       (value) => safeStorage.decryptString(value),
     );
     catalogService = new CatalogService(new AniListProvider(), catalogRepository, cacheRepository);
-    const releaseService = new ReleaseService(catalogRepository, cacheRepository);
-    const torrentFileService = new TorrentFileService(integrationSettings);
+    const torrentProviders = [
+      new NyaaTorrentProvider(),
+      new TokyoToshoTorrentProvider(),
+      new DarkMahouTorrentProvider(),
+    ] as const;
+    const releaseService = new ReleaseService(catalogRepository, cacheRepository, integrationSettings, torrentProviders);
+    const torrentFileService = new TorrentFileService(integrationSettings, torrentProviders);
     webTorrentService = new WebTorrentService(
       integrationSettings,
       new TorrentDownloadRepository(database),

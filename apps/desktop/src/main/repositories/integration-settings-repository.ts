@@ -14,6 +14,7 @@ const RowSchema = z.object({
   opensubtitles_username: z.string(),
   opensubtitles_password: SecretSchema,
   subtitle_languages_json: z.string(),
+  primary_language: z.enum(['pt-br', 'en', 'ja']),
   download_path: z.string().nullable(),
 }).strict();
 
@@ -34,7 +35,7 @@ export class IntegrationSettingsRepository {
     return RowSchema.parse(this.database.prepare(`
       SELECT
         opensubtitles_api_key, opensubtitles_username, opensubtitles_password,
-        subtitle_languages_json, download_path
+        subtitle_languages_json, primary_language, download_path
       FROM integration_settings
       WHERE id = 1
     `).get());
@@ -45,6 +46,7 @@ export class IntegrationSettingsRepository {
     const languages: unknown = JSON.parse(row.subtitle_languages_json);
     return IntegrationSettingsSchema.parse({
       torrentDownloadPath: row.download_path ?? this.defaultDownloadPath,
+      primaryLanguage: row.primary_language,
       openSubtitles: {
         hasApiKey: row.opensubtitles_api_key !== null,
         username: row.opensubtitles_username,
@@ -76,13 +78,14 @@ export class IntegrationSettingsRepository {
     this.database.prepare(`
       UPDATE integration_settings SET
         opensubtitles_api_key = ?, opensubtitles_username = ?, opensubtitles_password = ?,
-        subtitle_languages_json = ?, download_path = ?
+        subtitle_languages_json = ?, primary_language = ?, download_path = ?
       WHERE id = 1
     `).run(
       secret(input.openSubtitles.apiKey, current.opensubtitles_api_key),
       input.openSubtitles.username,
       secret(input.openSubtitles.password, current.opensubtitles_password),
       JSON.stringify(input.subtitleLanguages),
+      input.primaryLanguage,
       current.download_path,
     );
     return this.get();

@@ -18,7 +18,7 @@ describe('database foundation', () => {
       theme: 'oled',
       reduceMotion: true,
     });
-    expect(database.prepare('SELECT COUNT(*) FROM schema_migrations').pluck().get()).toBe(5);
+    expect(database.prepare('SELECT COUNT(*) FROM schema_migrations').pluck().get()).toBe(6);
     expect(database.prepare(`
       SELECT COUNT(*) FROM pragma_table_info('integration_settings')
       WHERE name LIKE 'qbittorrent_%'
@@ -32,11 +32,17 @@ describe('database foundation', () => {
     );
     expect(integrations.get()).toMatchObject({
       torrentDownloadPath: 'C:\\Downloads\\Kitsune',
+      primaryLanguage: 'pt-br',
       subtitleLanguages: ['pt-br', 'en'],
     });
+    expect(integrations.update({
+      primaryLanguage: 'en',
+      openSubtitles: { username: '' },
+      subtitleLanguages: ['en', 'pt-br'],
+    })).toMatchObject({ primaryLanguage: 'en', subtitleLanguages: ['en', 'pt-br'] });
     const torrents = new TorrentDownloadRepository(database);
     torrents.save({
-      releaseId: '1890607',
+      releaseId: 'nyaa:1890607',
       infoHash: '27a54cbc8334f7f7c90d43482fb9ef1547bce5a7',
       torrentFilePath: 'C:\\Downloads\\Kitsune\\Torrents\\1890607.torrent',
       destinationPath: 'C:\\Downloads\\Kitsune\\Videos',
@@ -44,7 +50,7 @@ describe('database foundation', () => {
       state: 'paused',
       error: null,
     });
-    expect(torrents.list()).toMatchObject([{ releaseId: '1890607', state: 'paused', name: 'Another' }]);
+    expect(torrents.list()).toMatchObject([{ releaseId: 'nyaa:1890607', state: 'paused', name: 'Another' }]);
     database.close();
   });
 

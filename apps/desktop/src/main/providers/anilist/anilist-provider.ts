@@ -5,6 +5,7 @@ import {
   ExternalAnimeSummaryArraySchema,
   ExternalAnimeSummarySchema,
   type CatalogProvider,
+  type CatalogProviderSearchInput,
   type ExternalAnimeDetails,
   type ExternalAnimeSummary,
 } from '../catalog-provider';
@@ -73,9 +74,9 @@ const SUMMARY_FIELDS = `
 `;
 
 const SEARCH_QUERY = `
-  query SearchAnime($search: String!, $perPage: Int!) {
+  query SearchAnime($search: String, $genres: [String], $sort: [MediaSort], $perPage: Int!) {
     Page(page: 1, perPage: $perPage) {
-      media(search: $search, type: ANIME, isAdult: false, sort: SEARCH_MATCH) {
+      media(search: $search, genre_in: $genres, type: ANIME, isAdult: false, sort: $sort) {
         ${SUMMARY_FIELDS}
       }
     }
@@ -111,7 +112,7 @@ const DETAILS_QUERY = `
 `;
 
 type GraphqlVariables =
-  | { search: string; perPage: number }
+  | { search: string | null; genres: readonly string[] | null; sort: readonly string[]; perPage: number }
   | { perPage: number }
   | { id: number };
 
@@ -185,6 +186,8 @@ export class AniListProvider implements CatalogProvider {
   public readonly id = 'anilist';
   private nextRequestAt = 0;
 
+  public constructor(private readonly fetcher: typeof fetch = fetch) {}
+
   private async throttle(signal: AbortSignal): Promise<void> {
     const scheduledAt = Math.max(Date.now(), this.nextRequestAt);
     this.nextRequestAt = scheduledAt + REQUEST_INTERVAL_MS;
@@ -200,7 +203,7 @@ export class AniListProvider implements CatalogProvider {
     for (let attempt = 1; attempt <= 2; attempt += 1) {
       await this.throttle(signal);
       try {
-        const response = await fetch(ANILIST_URL, {
+        const response = await this.fetcher(ANILIST_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify({ query, variables }),
@@ -248,10 +251,15 @@ export class AniListProvider implements CatalogProvider {
     throw new ApplicationError('PROVIDER_UNAVAILABLE', 'O AniList está indisponível.', true);
   }
 
-  public async search(query: string, signal: AbortSignal): Promise<ExternalAnimeSummary[]> {
+  public async search(input: CatalogProviderSearchInput, signal: AbortSignal): Promise<ExternalAnimeSummary[]> {
     const data = await this.request(
       SEARCH_QUERY,
-      { search: query, perPage: 24 },
+      {
+        search: input.query,
+        genres: input.genres.length === 0 ? null : input.genres,
+        sort: input.query === null ? ['POPULARITY_DESC', 'SCORE_DESC'] : ['SEARCH_MATCH', 'POPULARITY_DESC'],
+        perPage: 24,
+      },
       PageDataSchema,
       signal,
     );

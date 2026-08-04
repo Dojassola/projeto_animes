@@ -166,8 +166,9 @@ export class CatalogService {
   }
 
   public async search(input: CatalogSearchInput): Promise<CatalogCollection> {
-    const normalizedQuery = normalizeCatalogQuery(input.query);
-    const cacheKey = `${this.provider.id}:search:${normalizedQuery}`;
+    const normalizedQuery = input.query === null ? '' : normalizeCatalogQuery(input.query);
+    const genres = [...input.genres].sort();
+    const cacheKey = `${this.provider.id}:search:v3:${normalizedQuery}:${genres.join(',')}`;
     const cached = this.cacheRepository.get(cacheKey, ExternalAnimeSummaryArraySchema);
     if (cached !== undefined && !cached.expired) return this.saveCollection(cached.value, false);
 
@@ -176,7 +177,7 @@ export class CatalogService {
         this.summaryFlights,
         cacheKey,
         input.requestId,
-        (signal) => this.provider.search(input.query.trim(), signal),
+        (signal) => this.provider.search({ query: input.query, genres }, signal),
       );
       this.cacheRepository.set(cacheKey, items, SEARCH_TTL_MS, ExternalAnimeSummaryArraySchema);
       return this.saveCollection(items, false);
@@ -207,6 +208,11 @@ export class CatalogService {
   }
 
   public async getDetails(input: CatalogDetailsInput): Promise<CatalogDetailsPayload> {
+    if (input.source === 'local') {
+      const local = this.catalogRepository.getDetails(input.animeId);
+      if (local === undefined) throw new ApplicationError('ANIME_NOT_FOUND', 'Anime não encontrado.', false);
+      return CatalogDetailsPayloadSchema.parse({ anime: local, stale: true });
+    }
     const anilistId = this.catalogRepository.getAnilistId(input.animeId);
     if (anilistId === undefined) {
       throw new ApplicationError('ANIME_NOT_FOUND', 'Anime não encontrado.', false);

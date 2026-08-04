@@ -5,7 +5,22 @@ import { AnimeIdSchema, HttpsUrlSchema, RequestIdSchema } from './catalog';
 const failure = z.object({ ok: z.literal(false), error: AppErrorDtoSchema }).strict();
 export const LanguageCodeSchema = z.string().regex(/^[a-z]{2}(?:-[a-z]{2})?$/);
 export const InfoHashSchema = z.string().regex(/^[a-fA-F0-9]{40}$/);
-export const NyaaItemIdSchema = z.string().regex(/^\d{1,12}$/);
+export const MagnetUriSchema = z
+  .string()
+  .max(16_384)
+  .refine((value) => {
+    try {
+      const url = new URL(value);
+      const xt = url.searchParams.get('xt') ?? '';
+      return url.protocol === 'magnet:' && /^urn:btih:(?:[a-f\d]{40}|[a-z2-7]{32})$/i.test(xt);
+    } catch {
+      return false;
+    }
+  }, 'Magnet inválido');
+export const TorrentSourceUrlSchema = z.union([HttpsUrlSchema, MagnetUriSchema]);
+export const PrimaryLanguageSchema = z.enum(['pt-br', 'en', 'ja']);
+export const TorrentProviderIdSchema = z.enum(['nyaa', 'tokyotosho', 'darkmahou']);
+export const ReleaseIdSchema = z.string().regex(/^(?:(?:nyaa|tokyotosho):\d{1,12}|darkmahou:[a-f\d]{40})$/i);
 
 export const ParsedReleaseSchema = z.object({
   episode: z.number().int().positive().nullable(),
@@ -16,19 +31,22 @@ export const ParsedReleaseSchema = z.object({
   group: z.string().nullable(),
   batch: z.boolean(),
   dualAudio: z.boolean(),
+  audioLanguages: z.array(LanguageCodeSchema).max(8),
   subtitleLanguages: z.array(LanguageCodeSchema),
 }).strict();
 
 export const ReleaseCandidateSchema = z.object({
-  id: NyaaItemIdSchema,
+  id: ReleaseIdSchema,
+  provider: TorrentProviderIdSchema,
+  providerName: z.string().min(1).max(50),
   title: z.string().min(1).max(500),
   detailsUrl: HttpsUrlSchema,
-  torrentUrl: HttpsUrlSchema,
+  torrentUrl: TorrentSourceUrlSchema,
   infoHash: InfoHashSchema,
   publishedAt: z.iso.datetime(),
   sizeBytes: z.number().int().nonnegative(),
-  seeders: z.number().int().nonnegative(),
-  leechers: z.number().int().nonnegative(),
+  seeders: z.number().int().nonnegative().nullable(),
+  leechers: z.number().int().nonnegative().nullable(),
   trusted: z.boolean(),
   remake: z.boolean(),
   parsed: ParsedReleaseSchema,
@@ -41,13 +59,25 @@ export const ReleaseCandidateArraySchema = z.array(ReleaseCandidateSchema).max(1
 export const ReleaseSearchInputSchema = z.object({
   animeId: AnimeIdSchema,
   episode: z.number().int().positive().nullable(),
+  provider: TorrentProviderIdSchema,
   requestId: RequestIdSchema,
 }).strict();
+export const ReleaseSearchStatsSchema = z.object({
+  received: z.number().int().nonnegative(),
+  titleMatched: z.number().int().nonnegative(),
+  available: z.number().int().nonnegative(),
+  accepted: z.number().int().nonnegative(),
+}).strict();
 export const ReleaseSearchResultSchema = z.discriminatedUnion('ok', [
-  z.object({ ok: z.literal(true), data: ReleaseCandidateArraySchema, stale: z.boolean() }).strict(),
+  z.object({
+    ok: z.literal(true),
+    data: ReleaseCandidateArraySchema,
+    stale: z.boolean(),
+    stats: ReleaseSearchStatsSchema,
+  }).strict(),
   failure,
 ]);
-export const ReleaseDownloadInputSchema = z.object({ releaseId: NyaaItemIdSchema }).strict();
+export const ReleaseDownloadInputSchema = z.object({ releaseId: ReleaseIdSchema }).strict();
 export const ReleaseDownloadResultSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
@@ -59,6 +89,7 @@ export const MediaCancelInputSchema = z.object({ requestId: RequestIdSchema }).s
 
 export const IntegrationSettingsSchema = z.object({
   torrentDownloadPath: z.string().min(1).max(1_024),
+  primaryLanguage: PrimaryLanguageSchema,
   openSubtitles: z.object({
     hasApiKey: z.boolean(),
     username: z.string().max(100),
@@ -67,6 +98,7 @@ export const IntegrationSettingsSchema = z.object({
   subtitleLanguages: z.array(LanguageCodeSchema).min(1).max(8),
 }).strict();
 export const UpdateIntegrationSettingsInputSchema = z.object({
+  primaryLanguage: PrimaryLanguageSchema,
   openSubtitles: z.object({
     apiKey: z.string().max(500).optional(),
     username: z.string().max(100),
@@ -92,7 +124,7 @@ export const TorrentFileSummarySchema = z.object({
   playable: z.boolean(),
 }).strict();
 export const TorrentDownloadSchema = z.object({
-  releaseId: NyaaItemIdSchema,
+  releaseId: ReleaseIdSchema,
   infoHash: InfoHashSchema,
   name: z.string().min(1).max(1_024),
   status: TorrentDownloadStateSchema,
@@ -105,7 +137,7 @@ export const TorrentDownloadSchema = z.object({
   files: z.array(TorrentFileSummarySchema).max(500),
   error: z.string().max(500).nullable(),
 }).strict();
-export const TorrentStartInputSchema = z.object({ releaseId: NyaaItemIdSchema }).strict();
+export const TorrentStartInputSchema = z.object({ releaseId: ReleaseIdSchema }).strict();
 export const TorrentStartResultSchema = z.discriminatedUnion('ok', [
   z.object({ ok: z.literal(true), data: TorrentDownloadSchema }).strict(),
   failure,
@@ -156,10 +188,13 @@ export const SubtitleDownloadResultSchema = z.discriminatedUnion('ok', [
 
 export type ReleaseSearchInput = z.infer<typeof ReleaseSearchInputSchema>;
 export type ReleaseSearchResult = z.infer<typeof ReleaseSearchResultSchema>;
+export type ReleaseSearchStats = z.infer<typeof ReleaseSearchStatsSchema>;
 export type ReleaseDownloadInput = z.infer<typeof ReleaseDownloadInputSchema>;
 export type ReleaseDownloadResult = z.infer<typeof ReleaseDownloadResultSchema>;
 export type MediaCancelInput = z.infer<typeof MediaCancelInputSchema>;
 export type ReleaseCandidate = z.infer<typeof ReleaseCandidateSchema>;
+export type PrimaryLanguage = z.infer<typeof PrimaryLanguageSchema>;
+export type TorrentProviderId = z.infer<typeof TorrentProviderIdSchema>;
 export type IntegrationSettings = z.infer<typeof IntegrationSettingsSchema>;
 export type UpdateIntegrationSettingsInput = z.infer<typeof UpdateIntegrationSettingsInputSchema>;
 export type IntegrationSettingsResult = z.infer<typeof IntegrationSettingsResultSchema>;

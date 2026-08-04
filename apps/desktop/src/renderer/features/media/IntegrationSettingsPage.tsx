@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { IntegrationSettings } from '../../../shared/contracts/media';
+import { PrimaryLanguageSchema, type IntegrationSettings } from '../../../shared/contracts/media';
 
 interface FormState {
   current: IntegrationSettings;
@@ -28,6 +28,7 @@ export function IntegrationSettingsPage(): React.JSX.Element {
     if (form === null) return;
     const languages = form.languages.split(',').map((value) => value.trim().toLocaleLowerCase('en')).filter(Boolean);
     const result = await window.kitsune.integrations.update({
+      primaryLanguage: form.current.primaryLanguage,
       openSubtitles: {
         username: form.current.openSubtitles.username,
         ...(form.apiKey.length > 0 ? { apiKey: form.apiKey } : {}),
@@ -60,8 +61,15 @@ export function IntegrationSettingsPage(): React.JSX.Element {
         <>
           <div className="settings-grid">
             <section className="panel">
-              <h2>Arquivos .torrent</h2>
-              <p>Os arquivos do Nyaa serão salvos localmente. O aplicativo não inicia downloads automáticos.</p>
+              <h2>Releases e idioma</h2>
+              <p>Nyaa e Tokyo Toshokan são consultados em paralelo; resultados repetidos são agrupados.</p>
+              <label>Idioma principal
+                <select value={form.current.primaryLanguage} onChange={(event) => { update({ ...form.current, primaryLanguage: PrimaryLanguageSchema.parse(event.currentTarget.value) }); }}>
+                  <option value="pt-br">Português do Brasil (dublado)</option>
+                  <option value="en">Inglês</option>
+                  <option value="ja">Japonês</option>
+                </select>
+              </label>
               <label>Pasta de destino<input readOnly value={form.current.torrentDownloadPath} /></label>
               <button type="button" onClick={() => void choosePath()}>Escolher pasta</button>
             </section>

@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import {
   InfoHashSchema,
-  NyaaItemIdSchema,
+  ReleaseIdSchema,
   TorrentDownloadStateSchema,
   type TorrentDownloadState,
 } from '../../shared/contracts/media';
 import type { KitsuneDatabase } from '../infrastructure/database/open-database';
 
 const TorrentDownloadRowSchema = z.object({
-  release_id: NyaaItemIdSchema,
+  release_id: ReleaseIdSchema,
   info_hash: InfoHashSchema,
   torrent_file_path: z.string().min(1),
   destination_path: z.string().min(1),

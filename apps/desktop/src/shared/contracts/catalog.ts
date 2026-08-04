@@ -14,6 +14,26 @@ export const AnimeStatusSchema = z
   .enum(['FINISHED', 'RELEASING', 'NOT_YET_RELEASED', 'CANCELLED', 'HIATUS'])
   .nullable();
 export const AnimeSeasonSchema = z.enum(['WINTER', 'SPRING', 'SUMMER', 'FALL']).nullable();
+export const AnimeGenreSchema = z.enum([
+  'Action',
+  'Adventure',
+  'Comedy',
+  'Drama',
+  'Ecchi',
+  'Fantasy',
+  'Horror',
+  'Mahou Shoujo',
+  'Mecha',
+  'Music',
+  'Mystery',
+  'Psychological',
+  'Romance',
+  'Sci-Fi',
+  'Slice of Life',
+  'Sports',
+  'Supernatural',
+  'Thriller',
+]);
 export const AnimeRelationTypeSchema = z.enum([
   'ADAPTATION',
   'PREQUEL',
@@ -108,13 +128,17 @@ export const CatalogDetailsPayloadSchema = z
 
 export const CatalogSearchInputSchema = z
   .object({
-    query: z.string().trim().min(2).max(100),
+    query: z.string().trim().min(2).max(100).nullable(),
+    genres: z.array(AnimeGenreSchema).max(6),
     requestId: RequestIdSchema,
   })
-  .strict();
+  .strict()
+  .refine((input) => input.query !== null || input.genres.length > 0, {
+    message: 'Informe um título ou selecione ao menos um gênero.',
+  });
 export const CatalogHomeInputSchema = z.object({ requestId: RequestIdSchema }).strict();
 export const CatalogDetailsInputSchema = z
-  .object({ animeId: AnimeIdSchema, requestId: RequestIdSchema })
+  .object({ animeId: AnimeIdSchema, requestId: RequestIdSchema, source: z.enum(['refresh', 'local']) })
   .strict();
 export const EpisodeDetailsInputSchema = z
   .object({
@@ -164,6 +188,7 @@ export const WatchlistSetResultSchema = z.discriminatedUnion('ok', [
 
 export type AnimeSummary = z.infer<typeof AnimeSummarySchema>;
 export type AnimeDetails = z.infer<typeof AnimeDetailsSchema>;
+export type AnimeGenre = z.infer<typeof AnimeGenreSchema>;
 export type Episode = z.infer<typeof EpisodeSchema>;
 export type CatalogCollection = z.infer<typeof CatalogCollectionSchema>;
 export type CatalogDetailsPayload = z.infer<typeof CatalogDetailsPayloadSchema>;

@@ -15,11 +15,12 @@ type EpisodeState =
 
 interface AnimeDetailsPageProps {
   animeId: string;
+  localOnly: boolean;
   onBack: () => void;
   onSelect: (animeId: string) => void;
 }
 
-export function AnimeDetailsPage({ animeId, onBack, onSelect }: AnimeDetailsPageProps): React.JSX.Element {
+export function AnimeDetailsPage({ animeId, localOnly, onBack, onSelect }: AnimeDetailsPageProps): React.JSX.Element {
   const [state, setState] = useState<DetailsState>({ status: 'loading' });
   const [visibleEpisodes, setVisibleEpisodes] = useState(48);
   const [episodeState, setEpisodeState] = useState<EpisodeState>({ status: 'idle' });
@@ -34,7 +35,7 @@ export function AnimeDetailsPage({ animeId, onBack, onSelect }: AnimeDetailsPage
     if (episodeRequestId.current !== null) void window.kitsune.catalog.cancel({ requestId: episodeRequestId.current });
     episodeRequestId.current = null;
 
-    void window.kitsune.catalog.getDetails({ animeId, requestId })
+    void window.kitsune.catalog.getDetails({ animeId, requestId, source: localOnly ? 'local' : 'refresh' })
       .then((result) => {
         if (!active) return;
         if (!result.ok) {
@@ -56,7 +57,7 @@ export function AnimeDetailsPage({ animeId, onBack, onSelect }: AnimeDetailsPage
       active = false;
       void window.kitsune.catalog.cancel({ requestId }).catch(() => undefined);
     };
-  }, [animeId]);
+  }, [animeId, localOnly]);
 
   useEffect(() => () => {
     if (episodeRequestId.current !== null) void window.kitsune.catalog.cancel({ requestId: episodeRequestId.current });
@@ -125,6 +126,10 @@ export function AnimeDetailsPage({ animeId, onBack, onSelect }: AnimeDetailsPage
 
   const { anime } = state.payload;
   const selectedEpisode = episodeState.status === 'idle' ? null : episodeState.episode;
+  const seasonRelations = anime.relations
+    .filter((relation) => relation.type === 'PREQUEL' || relation.type === 'SEQUEL')
+    .sort((left, right) => (left.anime.seasonYear ?? 9_999) - (right.anime.seasonYear ?? 9_999));
+  const otherRelations = anime.relations.filter((relation) => relation.type !== 'PREQUEL' && relation.type !== 'SEQUEL');
   return (
     <article className="details-page">
       <button className="back-button" type="button" onClick={onBack}>← Voltar</button>
@@ -157,6 +162,21 @@ export function AnimeDetailsPage({ animeId, onBack, onSelect }: AnimeDetailsPage
       </section>
 
       {anime.format === 'MOVIE' && <AcquisitionPanel animeId={anime.id} episode={null} />}
+
+      {seasonRelations.length > 0 && (
+        <section className="details-section">
+          <h2>Temporadas e continuações</h2>
+          <p className="description">Prequelas e sequências oficiais relacionadas a este anime.</p>
+          <div className="anime-grid compact">
+            {seasonRelations.map((relation) => (
+              <div key={`${relation.type}:${relation.anime.id}`}>
+                <small className="relation-type">{relation.type === 'PREQUEL' ? 'TEMPORADA ANTERIOR' : 'PRÓXIMA TEMPORADA'}</small>
+                <AnimeCard anime={relation.anime} onSelect={onSelect} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {anime.format !== 'MOVIE' && (
         <section className="details-section">
@@ -208,11 +228,11 @@ export function AnimeDetailsPage({ animeId, onBack, onSelect }: AnimeDetailsPage
         </section>
       )}
 
-      {anime.relations.length > 0 && (
+      {otherRelations.length > 0 && (
         <section className="details-section">
           <h2>Relacionados</h2>
           <div className="anime-grid compact">
-            {anime.relations.map((relation) => (
+            {otherRelations.map((relation) => (
               <div key={`${relation.type}:${relation.anime.id}`}>
                 <small className="relation-type">{relation.type.replaceAll('_', ' ')}</small>
                 <AnimeCard anime={relation.anime} onSelect={onSelect} />

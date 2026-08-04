@@ -82,8 +82,13 @@ export function registerMediaIpc(dependencies: Dependencies): () => void {
       const controller = new AbortController();
       requests.set(input.requestId, controller);
       try {
-        const result = await releaseService.search(input.animeId, input.episode, controller.signal);
-        return ReleaseSearchResultSchema.parse({ ok: true, data: result.data, stale: result.stale });
+        const result = await releaseService.search(input.animeId, input.episode, input.provider, controller.signal);
+        return ReleaseSearchResultSchema.parse({
+          ok: true,
+          data: result.data,
+          stale: result.stale,
+          stats: result.stats,
+        });
       } finally {
         if (requests.get(input.requestId) === controller) requests.delete(input.requestId);
       }

@@ -118,6 +118,7 @@ export function App(): React.JSX.Element {
         {state.status === 'ready' && view.page === 'details' && (
           <AnimeDetailsPage
             animeId={view.animeId}
+            localOnly={view.returnPage === 'watchlist'}
             onBack={() => { setView({ page: view.returnPage }); }}
             onSelect={selectAnime}
           />
