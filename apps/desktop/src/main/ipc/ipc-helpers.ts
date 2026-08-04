@@ -1,12 +1,44 @@
-import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
+import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import { ZodError } from 'zod';
 import type { AppErrorDto } from '../../shared/errors/app-error';
 import { ApplicationError } from '../domain/errors/application-error';
 
-export function authorize(event: IpcMainInvokeEvent, window: BrowserWindow): void {
+interface Parser<T> {
+  parse(value: unknown): T;
+}
+
+type ErrorListener = (channel: string, error: AppErrorDto, durationMs: number) => void;
+
+function authorize(event: IpcMainInvokeEvent, window: BrowserWindow): void {
   if (window.isDestroyed() || event.sender.id !== window.webContents.id) {
     throw new ApplicationError('IPC_UNAUTHORIZED', 'Operação não autorizada.', false);
   }
+}
+
+export function createIpcRegistrar(window: BrowserWindow, onError?: ErrorListener): {
+  handle: <T>(channel: string, resultSchema: Parser<T>, action: (raw: unknown) => unknown) => void;
+  dispose: () => void;
+} {
+  const channels: string[] = [];
+  return {
+    handle: <T>(channel: string, resultSchema: Parser<T>, action: (raw: unknown) => unknown): void => {
+      channels.push(channel);
+      ipcMain.handle(channel, async (event: IpcMainInvokeEvent, raw: unknown): Promise<T> => {
+        const startedAt = performance.now();
+        try {
+          authorize(event, window);
+          return resultSchema.parse(await action(raw));
+        } catch (error: unknown) {
+          const errorDto = toErrorDto(error);
+          onError?.(channel, errorDto, performance.now() - startedAt);
+          return resultSchema.parse({ ok: false, error: errorDto });
+        }
+      });
+    },
+    dispose: (): void => {
+      for (const channel of channels) ipcMain.removeHandler(channel);
+    },
+  };
 }
 
 export function toErrorDto(error: unknown): AppErrorDto {
@@ -30,4 +62,3 @@ export function toErrorDto(error: unknown): AppErrorDto {
     recoverable: true,
   };
 }
-

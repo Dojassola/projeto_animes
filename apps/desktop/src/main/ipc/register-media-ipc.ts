@@ -1,4 +1,4 @@
-import { dialog, ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
+import { dialog, type BrowserWindow } from 'electron';
 import {
   ChooseDownloadPathResultSchema,
   IntegrationSettingsResultSchema,
@@ -24,7 +24,7 @@ import type { ReleaseService } from '../services/release-service';
 import type { SubtitleService } from '../services/subtitle-service';
 import type { TorrentFileService } from '../services/torrent-file-service';
 import type { WebTorrentService } from '../services/webtorrent-service';
-import { authorize, toErrorDto } from './ipc-helpers';
+import { createIpcRegistrar } from './ipc-helpers';
 
 interface Dependencies {
   window: BrowserWindow;
@@ -40,153 +40,79 @@ export function registerMediaIpc(dependencies: Dependencies): () => void {
     window, integrationSettings, releaseService, torrentFileService, webTorrentService, subtitleService,
   } = dependencies;
   const requests = new Map<string, AbortController>();
+  const ipc = createIpcRegistrar(window);
 
-  ipcMain.handle(IPC_CHANNELS.integrationsGet, (event: IpcMainInvokeEvent, raw: unknown) => {
+  ipc.handle(IPC_CHANNELS.integrationsGet, IntegrationSettingsResultSchema, (raw) => {
+    MediaCancelInputSchema.omit({ requestId: true }).parse(raw);
+    return { ok: true, data: integrationSettings.get() };
+  });
+  ipc.handle(IPC_CHANNELS.integrationsUpdate, IntegrationSettingsResultSchema, (raw) => {
+    const input = UpdateIntegrationSettingsInputSchema.parse(raw);
+    return { ok: true, data: integrationSettings.update(input) };
+  });
+  ipc.handle(IPC_CHANNELS.integrationsChooseDownloadPath, ChooseDownloadPathResultSchema, async (raw) => {
+    MediaCancelInputSchema.omit({ requestId: true }).parse(raw);
+    const result = await dialog.showOpenDialog(window, {
+      title: 'Escolher pasta para arquivos .torrent',
+      defaultPath: integrationSettings.get().torrentDownloadPath,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    const selected = result.filePaths[0];
+    const data = selected === undefined ? integrationSettings.get() : integrationSettings.setDownloadPath(selected);
+    return { ok: true, data };
+  });
+  ipc.handle(IPC_CHANNELS.releasesSearch, ReleaseSearchResultSchema, async (raw) => {
+    const input = ReleaseSearchInputSchema.parse(raw);
+    const controller = new AbortController();
+    requests.set(input.requestId, controller);
     try {
-      authorize(event, window);
-      MediaCancelInputSchema.omit({ requestId: true }).parse(raw);
-      return IntegrationSettingsResultSchema.parse({ ok: true, data: integrationSettings.get() });
-    } catch (error: unknown) {
-      return IntegrationSettingsResultSchema.parse({ ok: false, error: toErrorDto(error) });
+      const result = await releaseService.search(input.animeId, input.episode, input.provider, controller.signal);
+      return { ok: true, data: result.data, stale: result.stale, stats: result.stats };
+    } finally {
+      if (requests.get(input.requestId) === controller) requests.delete(input.requestId);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.integrationsUpdate, (event: IpcMainInvokeEvent, raw: unknown) => {
+  ipc.handle(IPC_CHANNELS.releasesDownload, ReleaseDownloadResultSchema, async (raw) => {
+    const input = ReleaseDownloadInputSchema.parse(raw);
+    return { ok: true, data: await torrentFileService.save(input.releaseId) };
+  });
+  ipc.handle(IPC_CHANNELS.mediaCancel, OperationResultSchema, (raw) => {
+    const input = MediaCancelInputSchema.parse(raw);
+    requests.get(input.requestId)?.abort();
+    requests.delete(input.requestId);
+    return { ok: true };
+  });
+  ipc.handle(IPC_CHANNELS.torrentsStart, TorrentStartResultSchema, async (raw) => {
+    const input = TorrentStartInputSchema.parse(raw);
+    return { ok: true, data: await webTorrentService.start(input.releaseId) };
+  });
+  ipc.handle(IPC_CHANNELS.torrentsStatus, TorrentStatusResultSchema, (raw) => {
+    MediaCancelInputSchema.omit({ requestId: true }).parse(raw);
+    return { ok: true, data: webTorrentService.status() };
+  });
+  ipc.handle(IPC_CHANNELS.torrentsControl, OperationResultSchema, async (raw) => {
+    const input = TorrentControlInputSchema.parse(raw);
+    await webTorrentService.control(input);
+    return { ok: true };
+  });
+  ipc.handle(IPC_CHANNELS.subtitlesSearch, SubtitleSearchResultSchema, async (raw) => {
+    const input = SubtitleSearchInputSchema.parse(raw);
+    const controller = new AbortController();
+    requests.set(input.requestId, controller);
     try {
-      authorize(event, window);
-      const input = UpdateIntegrationSettingsInputSchema.parse(raw);
-      return IntegrationSettingsResultSchema.parse({ ok: true, data: integrationSettings.update(input) });
-    } catch (error: unknown) {
-      return IntegrationSettingsResultSchema.parse({ ok: false, error: toErrorDto(error) });
+      return { ok: true, data: await subtitleService.search(input.animeId, input.episode, controller.signal) };
+    } finally {
+      if (requests.get(input.requestId) === controller) requests.delete(input.requestId);
     }
   });
-  ipcMain.handle(IPC_CHANNELS.integrationsChooseDownloadPath, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      MediaCancelInputSchema.omit({ requestId: true }).parse(raw);
-      const result = await dialog.showOpenDialog(window, {
-        title: 'Escolher pasta para arquivos .torrent',
-        defaultPath: integrationSettings.get().torrentDownloadPath,
-        properties: ['openDirectory', 'createDirectory'],
-      });
-      const selected = result.filePaths[0];
-      const data = selected === undefined ? integrationSettings.get() : integrationSettings.setDownloadPath(selected);
-      return ChooseDownloadPathResultSchema.parse({ ok: true, data });
-    } catch (error: unknown) {
-      return ChooseDownloadPathResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.releasesSearch, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = ReleaseSearchInputSchema.parse(raw);
-      const controller = new AbortController();
-      requests.set(input.requestId, controller);
-      try {
-        const result = await releaseService.search(input.animeId, input.episode, input.provider, controller.signal);
-        return ReleaseSearchResultSchema.parse({
-          ok: true,
-          data: result.data,
-          stale: result.stale,
-          stats: result.stats,
-        });
-      } finally {
-        if (requests.get(input.requestId) === controller) requests.delete(input.requestId);
-      }
-    } catch (error: unknown) {
-      return ReleaseSearchResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.releasesDownload, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = ReleaseDownloadInputSchema.parse(raw);
-      const data = await torrentFileService.save(input.releaseId);
-      return ReleaseDownloadResultSchema.parse({ ok: true, data });
-    } catch (error: unknown) {
-      return ReleaseDownloadResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.mediaCancel, (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = MediaCancelInputSchema.parse(raw);
-      requests.get(input.requestId)?.abort();
-      requests.delete(input.requestId);
-      return OperationResultSchema.parse({ ok: true });
-    } catch (error: unknown) {
-      return OperationResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.torrentsStart, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = TorrentStartInputSchema.parse(raw);
-      return TorrentStartResultSchema.parse({ ok: true, data: await webTorrentService.start(input.releaseId) });
-    } catch (error: unknown) {
-      return TorrentStartResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.torrentsStatus, (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      MediaCancelInputSchema.omit({ requestId: true }).parse(raw);
-      return TorrentStatusResultSchema.parse({ ok: true, data: webTorrentService.status() });
-    } catch (error: unknown) {
-      return TorrentStatusResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.torrentsControl, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = TorrentControlInputSchema.parse(raw);
-      await webTorrentService.control(input);
-      return OperationResultSchema.parse({ ok: true });
-    } catch (error: unknown) {
-      return OperationResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.subtitlesSearch, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = SubtitleSearchInputSchema.parse(raw);
-      const controller = new AbortController();
-      requests.set(input.requestId, controller);
-      try {
-        const data = await subtitleService.search(input.animeId, input.episode, controller.signal);
-        return SubtitleSearchResultSchema.parse({ ok: true, data });
-      } finally {
-        if (requests.get(input.requestId) === controller) requests.delete(input.requestId);
-      }
-    } catch (error: unknown) {
-      return SubtitleSearchResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
-  });
-  ipcMain.handle(IPC_CHANNELS.subtitlesDownload, async (event: IpcMainInvokeEvent, raw: unknown) => {
-    try {
-      authorize(event, window);
-      const input = SubtitleDownloadInputSchema.parse(raw);
-      const data = await subtitleService.download(input.animeId, input.episode, input.fileId);
-      return SubtitleDownloadResultSchema.parse({ ok: true, ...data });
-    } catch (error: unknown) {
-      return SubtitleDownloadResultSchema.parse({ ok: false, error: toErrorDto(error) });
-    }
+  ipc.handle(IPC_CHANNELS.subtitlesDownload, SubtitleDownloadResultSchema, async (raw) => {
+    const input = SubtitleDownloadInputSchema.parse(raw);
+    return { ok: true, ...await subtitleService.download(input.animeId, input.episode, input.fileId) };
   });
 
   return () => {
     for (const controller of requests.values()) controller.abort();
     requests.clear();
-    for (const channel of [
-      IPC_CHANNELS.integrationsGet,
-      IPC_CHANNELS.integrationsUpdate,
-      IPC_CHANNELS.integrationsChooseDownloadPath,
-      IPC_CHANNELS.releasesSearch,
-      IPC_CHANNELS.releasesDownload,
-      IPC_CHANNELS.mediaCancel,
-      IPC_CHANNELS.torrentsStart,
-      IPC_CHANNELS.torrentsStatus,
-      IPC_CHANNELS.torrentsControl,
-      IPC_CHANNELS.subtitlesSearch,
-      IPC_CHANNELS.subtitlesDownload,
-    ]) ipcMain.removeHandler(channel);
+    ipc.dispose();
   };
 }
