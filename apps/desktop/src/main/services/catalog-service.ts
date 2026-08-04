@@ -32,6 +32,12 @@ import {
   type EpisodeMetadata,
   type EpisodeMetadataProvider,
 } from '../providers/jikan/jikan-episode-provider';
+import {
+  CatalogFallbackPayloadSchema,
+  KitsuFallbackProvider,
+  type CatalogFallbackProvider,
+  type CatalogFallbackPayload,
+} from '../providers/kitsu-fallback-provider';
 import type { CatalogRepository } from '../repositories/catalog-repository';
 import type { ProviderCacheRepository } from '../repositories/provider-cache-repository';
 
@@ -41,6 +47,7 @@ const ACTIVE_DETAILS_TTL_MS = 6 * 60 * 60 * 1_000;
 const FINISHED_DETAILS_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const EPISODE_LIST_TTL_MS = 24 * 60 * 60 * 1_000;
 const EPISODE_DETAILS_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
+const FALLBACK_TTL_MS = 24 * 60 * 60 * 1_000;
 
 interface CancellableFlight {
   controller: AbortController;
@@ -89,6 +96,7 @@ export class CatalogService {
   private readonly detailsFlights = new Map<string, Flight<ExternalAnimeDetails>>();
   private readonly episodeListFlights = new Map<string, Flight<EpisodeMetadata[]>>();
   private readonly episodeDetailsFlights = new Map<string, Flight<EpisodeMetadata>>();
+  private readonly fallbackFlights = new Map<string, Flight<CatalogFallbackPayload>>();
   private readonly activeRequests = new Map<string, CancellableFlight>();
 
   public constructor(
@@ -96,27 +104,71 @@ export class CatalogService {
     private readonly catalogRepository: CatalogRepository,
     private readonly cacheRepository: ProviderCacheRepository,
     private readonly episodeProvider: EpisodeMetadataProvider = new JikanEpisodeProvider(),
+    private readonly fallbackProvider: CatalogFallbackProvider = new KitsuFallbackProvider(),
   ) {}
+
+  private async fallback(anime: AnimeDetails, requestId: string): Promise<CatalogFallbackPayload> {
+    const cacheKey = `${this.fallbackProvider.id}:details:v1:${String(anime.anilistId)}`;
+    const cached = this.cacheRepository.get(cacheKey, CatalogFallbackPayloadSchema);
+    if (cached !== undefined && !cached.expired) return cached.value;
+    try {
+      const payload = await this.runDeduplicated(
+        this.fallbackFlights,
+        cacheKey,
+        requestId,
+        (signal) => this.fallbackProvider.getDetails(anime.anilistId, anime, signal),
+      );
+      this.cacheRepository.set(cacheKey, payload, FALLBACK_TTL_MS, CatalogFallbackPayloadSchema);
+      return payload;
+    } catch (error: unknown) {
+      if (cached !== undefined) return cached.value;
+      throw error;
+    }
+  }
+
+  private async fallbackEpisode(
+    anime: AnimeDetails,
+    episodeNumber: number,
+    requestId: string,
+  ): Promise<EpisodeMetadata | undefined> {
+    try {
+      const payload = await this.fallback(anime, requestId);
+      return payload.episodes.find((episode) => episode.number === episodeNumber);
+    } catch (error: unknown) {
+      if (error instanceof ApplicationError && error.code === 'OPERATION_CANCELLED') throw error;
+      return undefined;
+    }
+  }
 
   private async enrichEpisodes(anime: AnimeDetails, requestId: string): Promise<AnimeDetails> {
     const malId = anime.malId;
-    if (malId === null || anime.format === 'MOVIE') return anime;
-    const cacheKey = `jikan:episodes:v1:${String(malId)}`;
-    const cached = this.cacheRepository.get(cacheKey, EpisodeMetadataArraySchema);
-    if (cached !== undefined && !cached.expired) return mergeEpisodeMetadata(anime, cached.value);
-
+    if (anime.format === 'MOVIE') return anime;
+    if (malId !== null) {
+      const cacheKey = `jikan:episodes:v1:${String(malId)}`;
+      const cached = this.cacheRepository.get(cacheKey, EpisodeMetadataArraySchema);
+      if (cached !== undefined && !cached.expired && cached.value.length > 0) {
+        return mergeEpisodeMetadata(anime, cached.value);
+      }
+      try {
+        const episodes = await this.runDeduplicated(
+          this.episodeListFlights,
+          cacheKey,
+          requestId,
+          (signal) => this.episodeProvider.listEpisodes(malId, signal),
+        );
+        this.cacheRepository.set(cacheKey, episodes, EPISODE_LIST_TTL_MS, EpisodeMetadataArraySchema);
+        if (episodes.length > 0) return mergeEpisodeMetadata(anime, episodes);
+      } catch (error: unknown) {
+        if (error instanceof ApplicationError && error.code === 'OPERATION_CANCELLED') throw error;
+        if (cached !== undefined && cached.value.length > 0) return mergeEpisodeMetadata(anime, cached.value);
+      }
+    }
     try {
-      const episodes = await this.runDeduplicated(
-        this.episodeListFlights,
-        cacheKey,
-        requestId,
-        (signal) => this.episodeProvider.listEpisodes(malId, signal),
-      );
-      this.cacheRepository.set(cacheKey, episodes, EPISODE_LIST_TTL_MS, EpisodeMetadataArraySchema);
-      return mergeEpisodeMetadata(anime, episodes);
+      const payload = await this.fallback(anime, requestId);
+      return mergeEpisodeMetadata(anime, payload.episodes);
     } catch (error: unknown) {
       if (error instanceof ApplicationError && error.code === 'OPERATION_CANCELLED') throw error;
-      return cached === undefined ? anime : mergeEpisodeMetadata(anime, cached.value);
+      return anime;
     }
   }
 
@@ -211,7 +263,14 @@ export class CatalogService {
     if (input.source === 'local') {
       const local = this.catalogRepository.getDetails(input.animeId);
       if (local === undefined) throw new ApplicationError('ANIME_NOT_FOUND', 'Anime não encontrado.', false);
-      return CatalogDetailsPayloadSchema.parse({ anime: local, stale: true });
+      const cached = this.cacheRepository.get(
+        `${this.fallbackProvider.id}:details:v1:${String(local.anilistId)}`,
+        CatalogFallbackPayloadSchema,
+      );
+      return CatalogDetailsPayloadSchema.parse({
+        anime: cached === undefined ? local : mergeEpisodeMetadata(local, cached.value.episodes),
+        stale: true,
+      });
     }
     const anilistId = this.catalogRepository.getAnilistId(input.animeId);
     if (anilistId === undefined) {
@@ -240,7 +299,21 @@ export class CatalogService {
         return this.detailsPayload(this.catalogRepository.saveDetails(cached.value), true, input.requestId);
       }
       const local = this.catalogRepository.getDetails(input.animeId);
-      if (local !== undefined) return this.detailsPayload(local, true, input.requestId);
+      if (local !== undefined) {
+        try {
+          const fallback = await this.fallback(local, input.requestId);
+          const saved = this.catalogRepository.saveDetails(fallback.details);
+          return CatalogDetailsPayloadSchema.parse({
+            anime: mergeEpisodeMetadata(saved, fallback.episodes),
+            stale: false,
+          });
+        } catch (fallbackError: unknown) {
+          if (fallbackError instanceof ApplicationError && fallbackError.code === 'OPERATION_CANCELLED') {
+            throw fallbackError;
+          }
+          return this.detailsPayload(local, true, input.requestId);
+        }
+      }
       throw error;
     }
   }
@@ -251,6 +324,10 @@ export class CatalogService {
     const local = anime.episodes.find((episode) => episode.number === input.episodeNumber);
     const malId = anime.malId;
     if (malId === null) {
+      const fallback = await this.fallbackEpisode(anime, input.episodeNumber, input.requestId);
+      if (fallback !== undefined) {
+        return EpisodeDetailsPayloadSchema.parse({ episode: episodeFromMetadata(anime.id, fallback), stale: false });
+      }
       if (local === undefined) throw new ApplicationError('EPISODE_NOT_FOUND', 'Episódio não encontrado.', false);
       return EpisodeDetailsPayloadSchema.parse({ episode: local, stale: true });
     }
@@ -282,6 +359,10 @@ export class CatalogService {
       const summary = list?.value.find((episode) => episode.number === input.episodeNumber);
       if (summary !== undefined) {
         return EpisodeDetailsPayloadSchema.parse({ episode: episodeFromMetadata(anime.id, summary), stale: true });
+      }
+      const fallback = await this.fallbackEpisode(anime, input.episodeNumber, input.requestId);
+      if (fallback !== undefined) {
+        return EpisodeDetailsPayloadSchema.parse({ episode: episodeFromMetadata(anime.id, fallback), stale: false });
       }
       if (local !== undefined) return EpisodeDetailsPayloadSchema.parse({ episode: local, stale: true });
       throw error;
@@ -315,5 +396,6 @@ export class CatalogService {
     this.detailsFlights.clear();
     this.episodeListFlights.clear();
     this.episodeDetailsFlights.clear();
+    this.fallbackFlights.clear();
   }
 }

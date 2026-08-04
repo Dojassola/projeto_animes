@@ -1,6 +1,6 @@
 {
   "name": "@kitsune/desktop",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Aplicativo desktop local-first para catálogo e reprodução de anime.",
   "author": "Kitsune contributors",
   "private": true,

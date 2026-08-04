@@ -9,6 +9,7 @@ import type {
   ExternalAnimeSummary,
 } from '../src/main/providers/catalog-provider';
 import type { EpisodeMetadataProvider } from '../src/main/providers/jikan/jikan-episode-provider';
+import type { CatalogFallbackProvider } from '../src/main/providers/kitsu-fallback-provider';
 import { CatalogRepository } from '../src/main/repositories/catalog-repository';
 import { ProviderCacheRepository } from '../src/main/repositories/provider-cache-repository';
 import { CatalogService, normalizeCatalogQuery } from '../src/main/services/catalog-service';
@@ -29,6 +30,7 @@ const anime: ExternalAnimeSummary = {
 function createService(
   provider: CatalogProvider,
   episodeProvider?: EpisodeMetadataProvider,
+  fallbackProvider?: CatalogFallbackProvider,
 ): { service: CatalogService; database: Database.Database } {
   const database = new Database(':memory:');
   migrateDatabase(database);
@@ -39,6 +41,7 @@ function createService(
       new CatalogRepository(database),
       new ProviderCacheRepository(database),
       episodeProvider,
+      fallbackProvider,
     ),
   };
 }
@@ -193,6 +196,65 @@ describe('catalog service', () => {
       requestId: randomUUID(),
     });
     expect(episode.episode.synopsis).toBe('Frieren starts a new journey.');
+    service.dispose();
+    database.close();
+  });
+
+  it('uses an independent fallback when AniList details are unavailable', async () => {
+    const incomplete = { ...anime, anilistId: 154768, episodeCount: null };
+    const provider: CatalogProvider = {
+      id: 'fixture',
+      search: () => Promise.resolve([incomplete]),
+      home: () => Promise.resolve([incomplete]),
+      getDetails: () => Promise.reject(new Error('AniList unavailable')),
+    };
+    const fallback: CatalogFallbackProvider = {
+      id: 'fixture-fallback',
+      getDetails: () => Promise.resolve({
+        details: {
+          ...incomplete,
+          malId: 53065,
+          description: 'The second season.',
+          bannerImage: null,
+          genres: ['Romance'],
+          durationMinutes: 23,
+          relations: [],
+          episodeCount: 12,
+        },
+        episodes: Array.from({ length: 12 }, (_, index) => ({
+          number: index + 1,
+          title: `Episode ${String(index + 1)}`,
+          titleJapanese: null,
+          titleRomanji: null,
+          synopsis: index === 0 ? 'Fallback episode synopsis.' : null,
+          airedAt: null,
+          durationSeconds: 1_380,
+          filler: null,
+          recap: null,
+        })),
+      }),
+    };
+    const unavailableEpisodes: EpisodeMetadataProvider = {
+      listEpisodes: () => Promise.reject(new Error('Jikan unavailable')),
+      getEpisode: () => Promise.reject(new Error('Jikan unavailable')),
+    };
+    const { service, database } = createService(provider, unavailableEpisodes, fallback);
+    const collection = await service.search({ query: 'Dress-Up Darling', genres: [], requestId: randomUUID() });
+    const saved = collection.items[0];
+    if (saved === undefined) throw new Error('Fixture anime was not saved');
+
+    const payload = await service.getDetails({ animeId: saved.id, requestId: randomUUID(), source: 'refresh' });
+
+    expect(payload.stale).toBe(false);
+    expect(payload.anime.description).toBe('The second season.');
+    expect(payload.anime.malId).toBe(53065);
+    expect(payload.anime.episodes).toHaveLength(12);
+    const episode = await service.getEpisodeDetails({
+      animeId: saved.id,
+      episodeNumber: 1,
+      requestId: randomUUID(),
+    });
+    expect(episode.episode.synopsis).toBe('Fallback episode synopsis.');
     service.dispose();
     database.close();
   });
